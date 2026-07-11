@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Sketch Recorder — single object</title>
+<style>
+  :root {
+    --ink: #1e293b; --construction: #3b82f6; --discard: #ef4444;
+    --bg: #f4f6fa; --panel: #ffffff; --line: #d7dfeb; --accent: #1a2b4a;
+    --untagged: #f59e0b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg);
+    font-family: -apple-system, "Segoe UI", sans-serif; color: var(--ink);
+    touch-action: manipulation; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  header { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 8px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header .title { font-weight: 700; color: var(--accent); margin-right: 6px; }
+  select, button { font-size: 15px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink); }
+  button { cursor: pointer; }
+  button:disabled { opacity: .35; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.attention { background: var(--untagged); color: #fff; border-color: var(--untagged); }
+
+  #toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .group { display: flex; gap: 4px; align-items: center; padding: 2px 6px;
+    border: 1px dashed var(--line); border-radius: 10px; }
+  .group .lab { font-size: 11px; color: #64748b; text-transform: uppercase; }
+  .chip { font-size: 14px; padding: 7px 12px; border-radius: 999px;
+    border: 1.5px solid var(--line); background: #fff; }
+  .chip.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .chip.role-contour.active { background: var(--ink); border-color: var(--ink); }
+  .chip.role-construction.active { background: var(--construction); border-color: var(--construction); }
+  .chip.role-discard.active { background: var(--discard); border-color: var(--discard); }
+
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; padding: 8px; }
+  #canvasWrap { position: relative; background: #fff; border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 2px 10px rgba(26,43,74,.08); }
+  canvas { display: block; touch-action: none; border-radius: 10px; }
+
+  footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line);
+    font-size: 13px; color: #475569; }
+  #status { flex: 1; min-width: 160px; }
+
+  /* tag panel = bottom sheet so the strokes being tagged stay visible above it */
+  #tagPanel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: #fff; border-top: 2px solid var(--untagged);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(15,23,42,.18);
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    display: none; flex-direction: column; gap: 10px; }
+  #tagPanel.open { display: flex; }
+  #tagPanel .sheetTitle { font-weight: 700; color: var(--accent); font-size: 15px; }
+  #tagChips { display: flex; flex-wrap: wrap; gap: 6px; }
+  #tagInput { width: 100%; font-size: 16px; padding: 10px 12px;
+    border: 1.5px solid var(--line); border-radius: 10px; }
+  #tagInput:focus { outline: none; border-color: var(--untagged); }
+
+  #exportPanel { position: fixed; inset: 0; background: rgba(15,23,42,.45);
+    display: none; align-items: center; justify-content: center; z-index: 50; }
+  #exportPanel.open { display: flex; }
+  #exportCard { background: #fff; border-radius: 14px; padding: 16px; width: min(680px, 92vw);
+    max-height: 86vh; display: flex; flex-direction: column; gap: 10px; }
+  #exportCard textarea { width: 100%; height: 38vh; font: 11px/1.4 ui-monospace, Menlo, monospace;
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  label.toggle { font-size: 13px; color: #64748b; display: inline-flex; gap: 4px; align-items: center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="title">Sketch Recorder</span>
+    <input id="artistName" type="text" placeholder="artist name" autocomplete="off"
+           style="width:110px;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;">
+    <select id="objectType" title="object type">
+      <option value="apple">apple</option>
+      <option value="pear">pear</option>
+      <option value="ceramic_jar">ceramic_jar</option>
+    </select>
+    <button id="tagBtn">Tag</button>
+    <button id="newBtn">New</button>
+    <button id="undoBtn">Undo</button>
+    <button id="redoBtn">Redo</button>
+    <button id="replayBtn">Replay</button>
+    <button id="exportBtn" class="primary">Export</button>
+  </header>
+
+  <div id="toolbar">
+    <div class="group"><span class="lab">mode</span>
+      <button class="chip" id="modeDraw">Draw</button>
+      <button class="chip" id="modeSelect">Select</button>
+    </div>
+    <div class="group" id="selGroup" style="display:none"><span class="lab">stroke</span>
+      <button class="chip" id="closedBtn">closed: –</button>
+      <button class="chip" id="deselectBtn">deselect</button>
+    </div>
+    <label class="toggle"><input type="checkbox" id="axisGuide"> axis guide</label>
+    <label class="toggle"><input type="checkbox" id="testInput"> allow finger/mouse (test)</label>
+  </div>
+
+  <div id="stage"><div id="canvasWrap"><canvas id="cv"></canvas></div></div>
+
+  <footer><span id="status">ready</span><span id="hint">pen draws · draw a few strokes, then Tag them · Select mode + tap a stroke to retag</span></footer>
+</div>
+
+<!-- bottom-sheet tagging: pre-tag chips fill the box; the box stays free natural language -->
+<div id="tagPanel">
+  <span class="sheetTitle" id="tagTitle">Tag strokes</span>
+  <div id="tagChips"></div>
+  <input id="tagInput" type="text" autocomplete="off" autocapitalize="off"
+         placeholder="type any label in your own words…">
+  <div class="row" id="tagRoleRow">
+    <button class="chip" data-tagrole="">keep as drawn</button>
+    <button class="chip role-contour" data-tagrole="contour">contour</button>
+    <button class="chip role-construction" data-tagrole="construction">construction</button>
+    <button class="chip role-discard" data-tagrole="discard">discard</button>
+  </div>
+  <div class="row">
+    <button id="tagApplyBtn" class="primary">Apply</button>
+    <button id="tagCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<div id="exportPanel">
+  <div id="exportCard">
+    <strong id="exportTitle">Export</strong>
+    <textarea id="exportText" readonly></textarea>
+    <div class="row">
+      <button id="downloadBtn" class="primary">Download .json</button>
+      <button id="copyBtn">Copy to clipboard</button>
+      <button id="closeExportBtn">Close</button>
+    </div>
+    <span id="exportMsg" style="font-size:13px;color:#64748b"></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* Sketch Recorder — single-object hand-drawing data collection.
+   Flow: draw a few strokes -> Tag button -> bottom sheet with pre-tag chips +
+   a free natural-language box; the tag lands on the untagged strokes (or the
+   selected one). No eraser by design: the full stroke history IS the dataset. */
+
+const LOGICAL = 1000;                    // fixed logical canvas (raw px stored in export)
+const PRETAGS = {                        // chip shortcuts; the text box stays free-form
+  apple: ["body", "well", "stem", "outline", "detail"],
+  pear: ["body", "stem", "outline", "detail"],
+  ceramic_jar: ["mouth", "neck", "body", "base", "outline", "detail"],
+};
+const ROLE_COLOR = { contour: "#1e293b", construction: "#3b82f6", discard: "#ef4444" };
+const ROLE_ALPHA = { contour: 1.0, construction: 0.75, discard: 0.4 };
+const AUTOSAVE_KEY = "sketch_recorder_autosave_v2";
+
+const state = {
+  objectType: "apple",
+  role: "contour",
+  mode: "draw",             // draw | select
+  strokes: [],              // {order, label|null, role, closed, points[[x,y]], width[], t[]}
+  undoStack: [], redoStack: [],
+  selected: -1,
+  t0: null,                 // session time origin (first point of first stroke)
+  live: null,               // stroke being drawn
+  tagTargets: [],           // stroke indices the open tag sheet applies to
+  tagRole: "",              // role picked in the tag sheet ("" = keep as drawn)
+  replaying: false,         // input is ignored while a replay animation runs
+};
+window.SketchRecorder = state;           // exposed for testing/debugging
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let viewScale = 1;
+
+function fitCanvas() {
+  const stage = document.getElementById("stage");
+  const pad = 20;
+  const size = Math.max(240, Math.min(stage.clientWidth - pad, stage.clientHeight - pad));
+  const DPR = window.devicePixelRatio || 1;
+  cv.width = Math.round(size * DPR);
+  cv.height = cv.width;
+  cv.style.width = size + "px";
+  cv.style.height = size + "px";
+  viewScale = cv.width / LOGICAL;        // buffer px per logical px
+  redraw();
+}
+window.addEventListener("resize", fitCanvas);
+
+function toLogical(e) {
+  const r = cv.getBoundingClientRect();
+  return [ (e.clientX - r.left) / r.width * LOGICAL,
+           (e.clientY - r.top) / r.height * LOGICAL ];
+}
+
+/* ---------- rendering ---------- */
+function strokeWidthAt(p) { return 1.5 + (p == null ? 0.5 : p) * 6; }
+
+function drawStroke(s, highlight) {
+  const pts = s.points;
+  if (pts.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = ROLE_ALPHA[s.role] ?? 1;
+  ctx.strokeStyle = ROLE_COLOR[s.role] ?? "#1e293b";
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (let i = 1; i < pts.length; i++) {          // per-segment width = live pressure
+    ctx.beginPath();
+    ctx.lineWidth = strokeWidthAt(s.width[i]);
+    ctx.moveTo(pts[i-1][0], pts[i-1][1]);
+    ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+  }
+  if (s.closed) {
+    ctx.beginPath();
+    ctx.lineWidth = strokeWidthAt(s.width[0]);
+    ctx.moveTo(pts[pts.length-1][0], pts[pts.length-1][1]);
+    ctx.lineTo(pts[0][0], pts[0][1]);
+    ctx.stroke();
+  }
+  if (highlight) {
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = "#f59e0b";
+    ctx.setLineDash([6, 5]); ctx.lineWidth = 2;
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    ctx.strokeRect(Math.min(...xs) - 8, Math.min(...ys) - 8,
+                   (Math.max(...xs) - Math.min(...xs)) + 16,
+                   (Math.max(...ys) - Math.min(...ys)) + 16);
+  }
+  ctx.restore();
+}
+
+function redraw() {
+  ctx.setTransform(viewScale, 0, 0, viewScale, 0, 0);
+  ctx.clearRect(0, 0, LOGICAL, LOGICAL);
+  if (document.getElementById("axisGuide").checked) {   // guide only — never exported
+    ctx.save(); ctx.strokeStyle = "#dbe4f0"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(LOGICAL/2, 0); ctx.lineTo(LOGICAL/2, LOGICAL); ctx.stroke();
+    ctx.restore();
+  }
+  const sheetOpen = document.getElementById("tagPanel").classList.contains("open");
+  state.strokes.forEach((s, i) => drawStroke(s,
+    i === state.selected || (sheetOpen && state.tagTargets.includes(i))));
+  if (state.live) drawStroke(state.live, false);
+  updateStatus();
+}
+
+/* ---------- stroke capture (pen-only unless test toggle) ---------- */
+function inputAllowed(e) {
+  return e.pointerType === "pen" || document.getElementById("testInput").checked;
+}
+
+cv.addEventListener("pointerdown", (e) => {
+  if (state.replaying || !inputAllowed(e)) return;
+  e.preventDefault();
+  if (state.mode === "select") { selectAt(toLogical(e)); return; }
+  cv.setPointerCapture(e.pointerId);
+  if (state.t0 === null) state.t0 = e.timeStamp;
+  const [x, y] = toLogical(e);
+  state.live = { order: state.strokes.length, label: null, role: state.role,
+                 closed: false, points: [[x, y]],
+                 width: [e.pressure || 0.5], t: [Math.round(e.timeStamp - state.t0)] };
+  redraw();
+});
+
+cv.addEventListener("pointermove", (e) => {
+  if (!state.live || !inputAllowed(e)) return;
+  e.preventDefault();
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of (events.length ? events : [e])) {
+    const [x, y] = toLogical(ev);
+    const last = state.live.points[state.live.points.length - 1];
+    if (Math.hypot(x - last[0], y - last[1]) < 1.2) continue;   // drop micro-jitter
+    state.live.points.push([x, y]);
+    state.live.width.push(ev.pressure || 0.5);
+    state.live.t.push(Math.round(ev.timeStamp - state.t0));
+  }
+  redraw();
+});
+
+function finishStroke() {
+  const s = state.live;
+  state.live = null;
+  if (!s || s.points.length < 2) { redraw(); return; }   // ignore accidental taps
+  s.closed = autoClosed(s.points);
+  state.strokes.push(s);
+  pushAction({ type: "add" });
+  autosave(); refreshButtons(); redraw();
+}
+cv.addEventListener("pointerup", (e) => { if (state.live) { e.preventDefault(); finishStroke(); } });
+cv.addEventListener("pointercancel", () => { if (state.live) finishStroke(); });
+
+function autoClosed(pts) {   // same rule as the pipeline's _should_close: gap <= 15% of bbox diagonal
+  if (pts.length < 3) return false;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  if (diag < 1e-6) return false;
+  const gap = Math.hypot(pts[0][0] - pts[pts.length-1][0], pts[0][1] - pts[pts.length-1][1]);
+  return gap <= 0.15 * diag;
+}
+
+/* ---------- tagging: batch natural-language labels ---------- */
+function untaggedIndices() {
+  return state.strokes.map((s, i) => s.label == null ? i : -1).filter(i => i >= 0);
+}
+
+function openTagSheet() {
+  // selected stroke (in select mode) -> retag just it; otherwise all untagged strokes
+  const targets = (state.mode === "select" && state.selected >= 0)
+    ? [state.selected] : untaggedIndices();
+  if (!targets.length) return;
+  state.tagTargets = targets;
+  const chips = document.getElementById("tagChips");
+  chips.innerHTML = "";
+  for (const p of PRETAGS[state.objectType]) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = p;
+    b.onclick = () => {          // chip = shortcut that fills the box; box stays editable
+      document.getElementById("tagInput").value = p;
+      document.getElementById("tagInput").focus();
+    };
+    chips.appendChild(b);
+  }
+  document.getElementById("tagTitle").textContent =
+    targets.length === 1 && state.strokes[targets[0]].label != null
+      ? `Retag stroke #${targets[0]} (now: "${state.strokes[targets[0]].label}")`
+      : `Tag ${targets.length} stroke${targets.length > 1 ? "s" : ""}`;
+  document.getElementById("tagInput").value =
+    targets.length === 1 ? (state.strokes[targets[0]].label || "") : "";
+  state.tagRole = "";            // default: keep each stroke's role as drawn
+  refreshTagRoleChips();
+  document.getElementById("tagPanel").classList.add("open");
+  redraw();                      // highlights the target strokes above the sheet
+}
+
+function refreshTagRoleChips() {
+  document.querySelectorAll("[data-tagrole]").forEach(b =>
+    b.classList.toggle("active", b.dataset.tagrole === state.tagRole));
+}
+document.querySelectorAll("[data-tagrole]").forEach(b => b.onclick = () => {
+  state.tagRole = b.dataset.tagrole;
+  refreshTagRoleChips();
+});
+
+function applyTag() {
+  const label = document.getElementById("tagInput").value.trim();
+  const role = state.tagRole;                       // "" = keep as drawn
+  if (!label && !role) { closeTagSheet(); return; }
+  const targets = state.tagTargets;
+  pushAction({ type: "tag", indices: targets.slice(),
+               from: targets.map(i => state.strokes[i].label),
+               fromRoles: targets.map(i => state.strokes[i].role),
+               to: label || null, toRole: role || null });
+  targets.forEach(i => {
+    if (label) state.strokes[i].label = label;
+    if (role) state.strokes[i].role = role;
+  });
+  closeTagSheet();
+  autosave(); refreshButtons(); redraw();
+}
+
+function closeTagSheet() {
+  state.tagTargets = [];
+  document.getElementById("tagPanel").classList.remove("open");
+  redraw();
+}
+
+document.getElementById("tagBtn").onclick = openTagSheet;
+document.getElementById("tagApplyBtn").onclick = applyTag;
+document.getElementById("tagCancelBtn").onclick = closeTagSheet;
+document.getElementById("tagInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") applyTag();
+});
+
+/* ---------- selection (retag / role / closed on one stroke) ---------- */
+function selectAt([x, y]) {
+  let best = -1, bestD = 30;                       // logical-px hit threshold
+  state.strokes.forEach((s, i) => {
+    for (const p of s.points) {                    // every point: sparse strokes must stay hittable
+      const d = Math.hypot(p[0] - x, p[1] - y);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+  });
+  state.selected = best;
+  refreshChips(); redraw();
+}
+
+function setSelected(field, value) {
+  const i = state.selected;
+  if (i < 0) return;
+  pushAction({ type: "set", index: i, field, from: state.strokes[i][field], to: value });
+  state.strokes[i][field] = value;
+  autosave(); refreshChips(); redraw();
+}
+
+/* ---------- undo / redo (no eraser by design) ---------- */
+function pushAction(a) { state.undoStack.push(a); state.redoStack.length = 0; refreshButtons(); }
+
+function undo() {
+  const a = state.undoStack.pop();
+  if (!a) return;
+  if (a.type === "add") { a.stroke = state.strokes.pop(); state.selected = -1; }
+  else if (a.type === "tag") a.indices.forEach((idx, k) => {
+    state.strokes[idx].label = a.from[k];
+    if (a.fromRoles) state.strokes[idx].role = a.fromRoles[k];
+  });
+  else state.strokes[a.index][a.field] = a.from;
+  state.redoStack.push(a);
+  autosave(); refreshChips(); refreshButtons(); redraw();
+}
+function redo() {
+  const a = state.redoStack.pop();
+  if (!a) return;
+  if (a.type === "add") state.strokes.push(a.stroke);
+  else if (a.type === "tag") a.indices.forEach(idx => {
+    if (a.to != null) state.strokes[idx].label = a.to;
+    if (a.toRole != null) state.strokes[idx].role = a.toRole;
+  });
+  else state.strokes[a.index][a.field] = a.to;
+  state.undoStack.push(a);
+  autosave(); refreshChips(); refreshButtons(); redraw();
+}
+
+/* ---------- UI wiring ---------- */
+function refreshChips() {
+  document.getElementById("modeDraw").classList.toggle("active", state.mode === "draw");
+  document.getElementById("modeSelect").classList.toggle("active", state.mode === "select");
+  const sel = state.selected >= 0 && state.mode === "select";
+  document.getElementById("selGroup").style.display = sel ? "" : "none";
+  if (sel) document.getElementById("closedBtn").textContent =
+    "closed: " + (state.strokes[state.selected].closed ? "yes" : "no");
+  refreshButtons();
+}
+
+function refreshButtons() {
+  document.getElementById("undoBtn").disabled = !state.undoStack.length;
+  document.getElementById("redoBtn").disabled = !state.redoStack.length;
+  document.getElementById("replayBtn").disabled = !state.strokes.length;
+  document.getElementById("exportBtn").disabled = !state.strokes.length;
+  const n = untaggedIndices().length;
+  const sel = state.mode === "select" && state.selected >= 0;
+  const tagBtn = document.getElementById("tagBtn");
+  tagBtn.textContent = sel ? "Retag" : (n ? `Tag (${n})` : "Tag");
+  tagBtn.disabled = !sel && n === 0;
+  tagBtn.classList.toggle("attention", !sel && n > 0);
+}
+
+function updateStatus() {
+  const by = { contour: 0, construction: 0, discard: 0 };
+  state.strokes.forEach(s => by[s.role] = (by[s.role] || 0) + 1);
+  const n = untaggedIndices().length;
+  document.getElementById("status").textContent =
+    `${state.objectType} · ${state.strokes.length} strokes ` +
+    `(contour ${by.contour} · construction ${by.construction} · discard ${by.discard})` +
+    (n ? ` · untagged ${n}` : "");
+}
+
+document.getElementById("modeDraw").onclick = () => { state.mode = "draw"; state.selected = -1; refreshChips(); redraw(); };
+document.getElementById("modeSelect").onclick = () => { state.mode = "select"; refreshChips(); };
+document.getElementById("closedBtn").onclick = () =>
+  setSelected("closed", !state.strokes[state.selected].closed);
+document.getElementById("deselectBtn").onclick = () => { state.selected = -1; refreshChips(); redraw(); };
+document.getElementById("undoBtn").onclick = undo;
+document.getElementById("redoBtn").onclick = redo;
+document.getElementById("axisGuide").onchange = redraw;
+
+document.getElementById("objectType").onchange = (e) => {
+  if (state.strokes.length &&
+      !confirm("Changing object type starts a NEW drawing. Continue?")) {
+    e.target.value = state.objectType; return;
+  }
+  state.objectType = e.target.value;
+  newDrawing();
+};
+document.getElementById("newBtn").onclick = () => {
+  if (!state.strokes.length || confirm("Start a new drawing? Current strokes will be cleared (export first!)."))
+    newDrawing();
+};
+function newDrawing() {
+  state.strokes = []; state.undoStack = []; state.redoStack = [];
+  state.selected = -1; state.t0 = null; state.live = null; state.tagTargets = [];
+  document.getElementById("tagPanel").classList.remove("open");
+  autosave(); refreshChips(); redraw();
+}
+
+/* ---------- replay: watch the recorded process, point by point ----------
+   Uses the recorded per-point timestamps so the line grows at (roughly) the
+   speed it was drawn: 2x speed, thinking pauses between strokes capped. */
+const REPLAY_SPEED = 2;          // x real-time
+const SEG_DELAY_CAP = 40;        // ms max per segment
+const STROKE_GAP_CAP = 600;      // ms max pause between strokes
+
+function drawSegment(s, i) {
+  ctx.save();
+  ctx.globalAlpha = ROLE_ALPHA[s.role] ?? 1;
+  ctx.strokeStyle = ROLE_COLOR[s.role] ?? "#1e293b";
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.lineWidth = strokeWidthAt(s.width[i]);
+  ctx.moveTo(s.points[i-1][0], s.points[i-1][1]);
+  ctx.lineTo(s.points[i][0], s.points[i][1]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+document.getElementById("replayBtn").onclick = async () => {
+  if (state.replaying) return;
+  state.replaying = true;                 // pointerdown ignores input while replaying
+  const btn = document.getElementById("replayBtn");
+  btn.disabled = true;
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  ctx.setTransform(viewScale, 0, 0, viewScale, 0, 0);
+  ctx.clearRect(0, 0, LOGICAL, LOGICAL);
+  let prevEnd = null;
+  for (const s of state.strokes) {
+    if (prevEnd != null)                  // pause between strokes, capped
+      await wait(Math.min((s.t[0] - prevEnd) / REPLAY_SPEED, STROKE_GAP_CAP));
+    for (let i = 1; i < s.points.length; i++) {
+      drawSegment(s, i);
+      const dt = (s.t[i] - s.t[i-1]) / REPLAY_SPEED;
+      if (dt > 1) await wait(Math.min(dt, SEG_DELAY_CAP));
+    }
+    if (s.closed) {                       // closing segment appears last
+      ctx.save();
+      ctx.globalAlpha = ROLE_ALPHA[s.role] ?? 1;
+      ctx.strokeStyle = ROLE_COLOR[s.role] ?? "#1e293b";
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.lineWidth = strokeWidthAt(s.width[0]);
+      ctx.moveTo(s.points[s.points.length-1][0], s.points[s.points.length-1][1]);
+      ctx.lineTo(s.points[0][0], s.points[0][1]);
+      ctx.stroke();
+      ctx.restore();
+    }
+    prevEnd = s.t[s.t.length - 1];
+  }
+  state.replaying = false;
+  btn.disabled = false;
+  redraw();
+};
+
+/* ---------- export: BOTH download and copy box ---------- */
+function currentArtist() {
+  return document.getElementById("artistName").value.trim() || "me";
+}
+
+function buildPayload() {
+  return {
+    schema: "handdrawn-stroke-v2",     // v2: free natural-language `label` (was fixed `part`)
+    object_type: state.objectType,
+    artist: currentArtist(),
+    created: new Date().toISOString(),
+    canvas: { w: LOGICAL, h: LOGICAL },
+    strokes: state.strokes.map(s => ({
+      order: s.order, label: s.label, role: s.role, closed: s.closed,
+      points: s.points.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]),
+      width: s.width.map(w => Math.round(w * 1000) / 1000),
+      t: s.t,
+    })),
+  };
+}
+function exportName() {
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  const artist = currentArtist().replace(/[^\w一-鿿-]+/g, "_");  // filename-safe, CJK ok
+  return `${artist}_${state.objectType}_${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.json`;
+}
+document.getElementById("exportBtn").onclick = () => {
+  const n = untaggedIndices().length;
+  if (n && !confirm(`${n} stroke(s) still untagged — export anyway?`)) return;
+  const json = JSON.stringify(buildPayload());
+  document.getElementById("exportText").value = json;
+  document.getElementById("exportTitle").textContent = "Export — " + exportName();
+  document.getElementById("exportMsg").textContent =
+    `${state.strokes.length} strokes · ${(json.length / 1024).toFixed(1)} KB`;
+  document.getElementById("exportPanel").classList.add("open");
+};
+document.getElementById("downloadBtn").onclick = () => {
+  const blob = new Blob([document.getElementById("exportText").value],
+                        { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = exportName();
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  document.getElementById("exportMsg").textContent = "downloaded — check the Files app (Downloads)";
+};
+document.getElementById("copyBtn").onclick = async () => {
+  const ta = document.getElementById("exportText");
+  try { await navigator.clipboard.writeText(ta.value); }
+  catch { ta.select(); document.execCommand("copy"); }
+  document.getElementById("exportMsg").textContent = "copied to clipboard";
+};
+document.getElementById("closeExportBtn").onclick = () =>
+  document.getElementById("exportPanel").classList.remove("open");
+
+/* ---------- autosave (survive a Safari reload) ---------- */
+function autosave() {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
+      objectType: state.objectType, strokes: state.strokes, t0: state.t0 }));
+  } catch (_) { /* storage full/blocked: drawing continues, export still works */ }
+}
+function restore() {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data.strokes || !data.strokes.length) return;
+    state.objectType = data.objectType || "apple";
+    document.getElementById("objectType").value = state.objectType;
+    state.strokes = data.strokes; state.t0 = data.t0;
+  } catch (_) { /* corrupt autosave: start clean */ }
+}
+
+/* ---------- init ---------- */
+const ARTIST_KEY = "sketch_recorder_artist";
+document.getElementById("artistName").value = localStorage.getItem(ARTIST_KEY) || "";
+document.getElementById("artistName").addEventListener("change", () => {
+  try { localStorage.setItem(ARTIST_KEY, currentArtist()); } catch (_) {}
+});
+restore();
+refreshChips();
+fitCanvas();
+</script>
+</body>
+</html>
