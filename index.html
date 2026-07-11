@@ -109,7 +109,7 @@
 
   <div id="stage"><div id="canvasWrap"><canvas id="cv"></canvas></div></div>
 
-  <footer><span id="status">ready</span><span id="hint">pen draws · draw then Tag · Select mode taps a stroke to retag · Ctrl+Z undo / Ctrl+Y redo</span></footer>
+  <footer><span id="status">ready</span><span id="hint">pen draws · draw then Tag · Select taps a stroke to retag · Ctrl+Z discards last stroke (kept as data) / Ctrl+Y restores</span></footer>
 </div>
 
 <!-- bottom-sheet tagging: pre-tag chips fill the box; the box stays free natural language -->
@@ -122,7 +122,6 @@
     <button class="chip" data-tagrole="">keep as drawn</button>
     <button class="chip role-contour" data-tagrole="contour">contour</button>
     <button class="chip role-construction" data-tagrole="construction">construction</button>
-    <button class="chip role-discard" data-tagrole="discard">discard</button>
   </div>
   <div class="row">
     <button id="tagApplyBtn" class="primary">Apply</button>
@@ -166,7 +165,7 @@ const state = {
   role: "contour",
   mode: "draw",             // draw | select
   strokes: [],              // {order, label|null, role, closed, points[[x,y]], width[], t[]}
-  undoStack: [], redoStack: [],
+  discardStack: [],         // [{index, priorRole}] — undo discards a stroke, redo restores it
   selected: -1,
   t0: null,                 // session time origin (first point of first stroke)
   live: null,               // stroke being drawn
@@ -296,7 +295,6 @@ function finishStroke() {
   if (!s || s.points.length < 2) { redraw(); return; }   // ignore accidental taps
   s.closed = false;   // never auto-connect endpoints; close deliberately via Select mode
   state.strokes.push(s);
-  pushAction({ type: "add" });
   autosave(); refreshButtons(); redraw();
 }
 cv.addEventListener("pointerup", (e) => { if (state.live) { e.preventDefault(); finishStroke(); } });
@@ -306,7 +304,9 @@ cv.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ---------- tagging: batch natural-language labels ---------- */
 function untaggedIndices() {
-  return state.strokes.map((s, i) => s.label == null ? i : -1).filter(i => i >= 0);
+  // discarded strokes don't need a label — exclude them from the "untagged" batch
+  return state.strokes.map((s, i) => (s.label == null && s.role !== "discard") ? i : -1)
+                      .filter(i => i >= 0);
 }
 
 function openTagSheet() {
@@ -353,10 +353,6 @@ function applyTag() {
   const role = state.tagRole;                       // "" = keep as drawn
   if (!label && !role) { closeTagSheet(); return; }
   const targets = state.tagTargets;
-  pushAction({ type: "tag", indices: targets.slice(),
-               from: targets.map(i => state.strokes[i].label),
-               fromRoles: targets.map(i => state.strokes[i].role),
-               to: label || null, toRole: role || null });
   targets.forEach(i => {
     if (label) state.strokes[i].label = label;
     if (role) state.strokes[i].role = role;
@@ -405,36 +401,27 @@ function selectAt([x, y]) {
 function setSelected(field, value) {
   const i = state.selected;
   if (i < 0) return;
-  pushAction({ type: "set", index: i, field, from: state.strokes[i][field], to: value });
   state.strokes[i][field] = value;
   autosave(); refreshChips(); redraw();
 }
 
-/* ---------- undo / redo (no eraser by design) ---------- */
-function pushAction(a) { state.undoStack.push(a); state.redoStack.length = 0; refreshButtons(); }
-
+/* ---------- undo / redo: undo marks the last live stroke `discard`, redo restores it.
+   Nothing is ever removed (no eraser) — a discarded wrong line stays as process data. */
 function undo() {
-  const a = state.undoStack.pop();
-  if (!a) return;
-  if (a.type === "add") { a.stroke = state.strokes.pop(); state.selected = -1; }
-  else if (a.type === "tag") a.indices.forEach((idx, k) => {
-    state.strokes[idx].label = a.from[k];
-    if (a.fromRoles) state.strokes[idx].role = a.fromRoles[k];
-  });
-  else state.strokes[a.index][a.field] = a.from;
-  state.redoStack.push(a);
-  autosave(); refreshChips(); refreshButtons(); redraw();
+  for (let i = state.strokes.length - 1; i >= 0; i--) {
+    if (state.strokes[i].role !== "discard") {
+      state.discardStack.push({ index: i, priorRole: state.strokes[i].role });
+      state.strokes[i].role = "discard";
+      state.selected = -1;
+      autosave(); refreshChips(); refreshButtons(); redraw();
+      return;
+    }
+  }
 }
 function redo() {
-  const a = state.redoStack.pop();
+  const a = state.discardStack.pop();
   if (!a) return;
-  if (a.type === "add") state.strokes.push(a.stroke);
-  else if (a.type === "tag") a.indices.forEach(idx => {
-    if (a.to != null) state.strokes[idx].label = a.to;
-    if (a.toRole != null) state.strokes[idx].role = a.toRole;
-  });
-  else state.strokes[a.index][a.field] = a.to;
-  state.undoStack.push(a);
+  state.strokes[a.index].role = a.priorRole;   // un-discard
   autosave(); refreshChips(); refreshButtons(); redraw();
 }
 
@@ -450,8 +437,8 @@ function refreshChips() {
 }
 
 function refreshButtons() {
-  document.getElementById("undoBtn").disabled = !state.undoStack.length;
-  document.getElementById("redoBtn").disabled = !state.redoStack.length;
+  document.getElementById("undoBtn").disabled = !state.strokes.some(s => s.role !== "discard");
+  document.getElementById("redoBtn").disabled = !state.discardStack.length;
   document.getElementById("replayBtn").disabled = !state.strokes.length;
   document.getElementById("exportBtn").disabled = !state.strokes.length;
   const n = untaggedIndices().length;
@@ -494,7 +481,7 @@ document.getElementById("newBtn").onclick = () => {
     newDrawing();
 };
 function newDrawing() {
-  state.strokes = []; state.undoStack = []; state.redoStack = [];
+  state.strokes = []; state.discardStack = [];
   state.selected = -1; state.t0 = null; state.live = null; state.tagTargets = [];
   document.getElementById("tagPanel").classList.remove("open");
   autosave(); refreshChips(); redraw();
