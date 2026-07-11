@@ -14,7 +14,8 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg);
     font-family: -apple-system, "Segoe UI", sans-serif; color: var(--ink);
-    touch-action: manipulation; }
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none; -ms-user-select: none; }
   #app { display: flex; flex-direction: column; height: 100%; }
 
   header { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
@@ -43,7 +44,7 @@
     overflow: hidden; padding: 8px; }
   #canvasWrap { position: relative; background: #fff; border: 1px solid var(--line);
     border-radius: 10px; box-shadow: 0 2px 10px rgba(26,43,74,.08); }
-  canvas { display: block; touch-action: none; border-radius: 10px; }
+  canvas { display: block; touch-action: none; -ms-touch-action: none; border-radius: 10px; }
 
   footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line);
@@ -108,7 +109,7 @@
 
   <div id="stage"><div id="canvasWrap"><canvas id="cv"></canvas></div></div>
 
-  <footer><span id="status">ready</span><span id="hint">pen draws · draw a few strokes, then Tag them · Select mode + tap a stroke to retag</span></footer>
+  <footer><span id="status">ready</span><span id="hint">pen draws · draw then Tag · Select mode taps a stroke to retag · Ctrl+Z undo / Ctrl+Y redo</span></footer>
 </div>
 
 <!-- bottom-sheet tagging: pre-tag chips fill the box; the box stays free natural language -->
@@ -257,7 +258,12 @@ function inputAllowed(e) {
 }
 
 cv.addEventListener("pointerdown", (e) => {
-  if (state.replaying || !inputAllowed(e)) return;
+  if (state.replaying) return;
+  if (!inputAllowed(e)) {          // e.g. a tablet that reports as mouse, with the toggle off
+    document.getElementById("status").textContent =
+      `input '${e.pointerType}' ignored — tick "allow mouse/touch" to draw without a pen`;
+    return;
+  }
   e.preventDefault();
   if (state.mode === "select") { selectAt(toLogical(e)); return; }
   cv.setPointerCapture(e.pointerId);
@@ -288,22 +294,15 @@ function finishStroke() {
   const s = state.live;
   state.live = null;
   if (!s || s.points.length < 2) { redraw(); return; }   // ignore accidental taps
-  s.closed = autoClosed(s.points);
+  s.closed = false;   // never auto-connect endpoints; close deliberately via Select mode
   state.strokes.push(s);
   pushAction({ type: "add" });
   autosave(); refreshButtons(); redraw();
 }
 cv.addEventListener("pointerup", (e) => { if (state.live) { e.preventDefault(); finishStroke(); } });
 cv.addEventListener("pointercancel", () => { if (state.live) finishStroke(); });
-
-function autoClosed(pts) {   // same rule as the pipeline's _should_close: gap <= 15% of bbox diagonal
-  if (pts.length < 3) return false;
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-  if (diag < 1e-6) return false;
-  const gap = Math.hypot(pts[0][0] - pts[pts.length-1][0], pts[0][1] - pts[pts.length-1][1]);
-  return gap <= 0.15 * diag;
-}
+// Windows pen: press-and-hold otherwise fires a right-click context menu mid-stroke.
+cv.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ---------- tagging: batch natural-language labels ---------- */
 function untaggedIndices() {
@@ -377,6 +376,17 @@ document.getElementById("tagApplyBtn").onclick = applyTag;
 document.getElementById("tagCancelBtn").onclick = closeTagSheet;
 document.getElementById("tagInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") applyTag();
+});
+
+// Global undo/redo shortcuts (Ctrl/Cmd+Z, Ctrl+Y or Ctrl/Cmd+Shift+Z).
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toUpperCase();
+  if (tag === "INPUT" || tag === "TEXTAREA") return;              // let text fields do their own undo
+  if (document.getElementById("exportPanel").classList.contains("open")) return;
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
 });
 
 /* ---------- selection (retag / role / closed on one stroke) ---------- */
