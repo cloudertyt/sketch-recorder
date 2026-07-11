@@ -157,6 +157,7 @@ const PRETAGS = {                        // chip shortcuts; the text box stays f
 };
 const ROLE_COLOR = { contour: "#1e293b", construction: "#3b82f6", discard: "#ef4444" };
 const ROLE_ALPHA = { contour: 1.0, construction: 0.75, discard: 0.4 };
+const TAGGED_DIM = 0.45;   // tagged strokes fade so fresh untagged ones stand out — DISPLAY ONLY, never exported
 const AUTOSAVE_KEY = "sketch_recorder_autosave_v2";
 
 const state = {
@@ -205,7 +206,9 @@ function drawStroke(s, highlight) {
   const pts = s.points;
   if (pts.length < 2) return;
   ctx.save();
-  ctx.globalAlpha = ROLE_ALPHA[s.role] ?? 1;
+  // display-only fade for already-tagged strokes (a stroke is "tagged" once it has a label)
+  const dim = s.label != null ? TAGGED_DIM : 1.0;
+  ctx.globalAlpha = (ROLE_ALPHA[s.role] ?? 1) * dim;
   ctx.strokeStyle = ROLE_COLOR[s.role] ?? "#1e293b";
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   for (let i = 1; i < pts.length; i++) {          // per-segment width = live pressure
