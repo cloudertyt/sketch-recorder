@@ -119,7 +119,6 @@
   <input id="tagInput" type="text" autocomplete="off" autocapitalize="off"
          placeholder="type any label in your own words…">
   <div class="row" id="tagRoleRow">
-    <button class="chip" data-tagrole="">keep as drawn</button>
     <button class="chip role-contour" data-tagrole="contour">contour</button>
     <button class="chip role-construction" data-tagrole="construction">construction</button>
   </div>
@@ -344,7 +343,8 @@ function refreshTagRoleChips() {
     b.classList.toggle("active", b.dataset.tagrole === state.tagRole));
 }
 document.querySelectorAll("[data-tagrole]").forEach(b => b.onclick = () => {
-  state.tagRole = b.dataset.tagrole;
+  // toggle: tapping the active role clears it back to "keep as drawn" ("")
+  state.tagRole = (state.tagRole === b.dataset.tagrole) ? "" : b.dataset.tagrole;
   refreshTagRoleChips();
 });
 
