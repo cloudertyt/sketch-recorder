@@ -86,12 +86,19 @@
       <option value="pear">pear</option>
       <option value="ceramic_jar">ceramic_jar</option>
     </select>
+    <select id="poseSel" title="pose (recorded with the drawing)">
+      <option value="upright">upright</option>
+      <option value="lean_left">lean ◀</option>
+      <option value="lean_right">lean ▶</option>
+    </select>
     <button id="tagBtn">Tag</button>
     <button id="newBtn">New</button>
     <button id="undoBtn">Undo</button>
     <button id="redoBtn">Redo</button>
     <button id="replayBtn">Replay</button>
-    <button id="exportBtn" class="primary">Export</button>
+    <button id="addBatchBtn" class="primary" title="save this drawing and start the next">＋ Add to batch</button>
+    <button id="exportBatchBtn" disabled title="download all batched drawings as one file">Batch (0)</button>
+    <button id="exportBtn">Export one</button>
   </header>
 
   <div id="toolbar">
@@ -135,6 +142,7 @@
     <div class="row">
       <button id="downloadBtn" class="primary">Download .json</button>
       <button id="copyBtn">Copy to clipboard</button>
+      <button id="clearBatchBtn">Clear batch</button>
       <button id="closeExportBtn">Close</button>
     </div>
     <span id="exportMsg" style="font-size:13px;color:#64748b"></span>
@@ -161,6 +169,9 @@ const AUTOSAVE_KEY = "sketch_recorder_autosave_v2";
 
 const state = {
   objectType: "apple",
+  pose: "upright",          // upright | lean_left | lean_right — recorded per drawing
+  batch: [],                // completed drawings awaiting a single bundled export
+  exportFilename: null,     // filename the export panel's Download button should use
   role: "contour",
   mode: "draw",             // draw | select
   strokes: [],              // {order, label|null, role, closed, points[[x,y]], width[], t[]}
@@ -552,6 +563,7 @@ function buildPayload() {
   return {
     schema: "handdrawn-stroke-v2",     // v2: free natural-language `label` (was fixed `part`)
     object_type: state.objectType,
+    pose: state.pose,                  // upright | lean_left | lean_right
     artist: currentArtist(),
     created: new Date().toISOString(),
     canvas: { w: LOGICAL, h: LOGICAL },
@@ -572,8 +584,9 @@ document.getElementById("exportBtn").onclick = () => {
   const n = untaggedIndices().length;
   if (n && !confirm(`${n} stroke(s) still untagged — export anyway?`)) return;
   const json = JSON.stringify(buildPayload());
+  state.exportFilename = exportName();
   document.getElementById("exportText").value = json;
-  document.getElementById("exportTitle").textContent = "Export — " + exportName();
+  document.getElementById("exportTitle").textContent = "Export — " + state.exportFilename;
   document.getElementById("exportMsg").textContent =
     `${state.strokes.length} strokes · ${(json.length / 1024).toFixed(1)} KB`;
   document.getElementById("exportPanel").classList.add("open");
@@ -583,7 +596,7 @@ document.getElementById("downloadBtn").onclick = () => {
                         { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = exportName();
+  a.download = state.exportFilename || exportName();
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   document.getElementById("exportMsg").textContent = "downloaded — check the Files app (Downloads)";
@@ -597,11 +610,56 @@ document.getElementById("copyBtn").onclick = async () => {
 document.getElementById("closeExportBtn").onclick = () =>
   document.getElementById("exportPanel").classList.remove("open");
 
+/* ---------- pose ---------- */
+document.getElementById("poseSel").onchange = (e) => { state.pose = e.target.value; autosave(); };
+
+/* ---------- batch: collect many drawings, export as one file ---------- */
+const BATCH_KEY = "sketch_recorder_batch_v1";
+function saveBatch() { try { localStorage.setItem(BATCH_KEY, JSON.stringify(state.batch)); } catch (_) {} }
+function refreshBatchUI() {
+  const n = state.batch.length;
+  const b = document.getElementById("exportBatchBtn");
+  b.textContent = "Batch (" + n + ")";
+  b.disabled = n === 0;
+}
+function batchName() {
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  const artist = currentArtist().replace(/[^\w一-鿿-]+/g, "_");
+  return `${artist}_batch_${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.json`;
+}
+document.getElementById("addBatchBtn").onclick = () => {
+  if (!state.strokes.length) { document.getElementById("status").textContent = "draw something first"; return; }
+  const n = untaggedIndices().length;
+  if (n && !confirm(`${n} stroke(s) still untagged — add to batch anyway?`)) return;
+  state.batch.push(buildPayload());
+  saveBatch(); refreshBatchUI();
+  newDrawing();
+  document.getElementById("status").textContent = `✓ added — ${state.batch.length} in batch (keep drawing, then Batch → Download)`;
+};
+document.getElementById("exportBatchBtn").onclick = () => {
+  if (!state.batch.length) return;
+  const payload = { schema: "handdrawn-batch-v1", artist: currentArtist(),
+    created: new Date().toISOString(), count: state.batch.length, drawings: state.batch };
+  const json = JSON.stringify(payload);
+  state.exportFilename = batchName();
+  document.getElementById("exportText").value = json;
+  document.getElementById("exportTitle").textContent = "Export batch — " + state.exportFilename;
+  document.getElementById("exportMsg").textContent =
+    `${state.batch.length} drawings · ${(json.length / 1024).toFixed(1)} KB — Download, move ONE file, then Clear batch`;
+  document.getElementById("exportPanel").classList.add("open");
+};
+document.getElementById("clearBatchBtn").onclick = () => {
+  if (!state.batch.length) { document.getElementById("exportMsg").textContent = "batch is already empty"; return; }
+  if (!confirm(`Clear the batch of ${state.batch.length} drawing(s)? Make sure you downloaded it first.`)) return;
+  state.batch = []; saveBatch(); refreshBatchUI();
+  document.getElementById("exportPanel").classList.remove("open");
+};
+
 /* ---------- autosave (survive a Safari reload) ---------- */
 function autosave() {
   try {
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
-      objectType: state.objectType, strokes: state.strokes, t0: state.t0 }));
+      objectType: state.objectType, pose: state.pose, strokes: state.strokes, t0: state.t0 }));
   } catch (_) { /* storage full/blocked: drawing continues, export still works */ }
 }
 function restore() {
@@ -609,6 +667,7 @@ function restore() {
     const raw = localStorage.getItem(AUTOSAVE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
+    if (data.pose) { state.pose = data.pose; document.getElementById("poseSel").value = state.pose; }
     if (!data.strokes || !data.strokes.length) return;
     state.objectType = data.objectType || "apple";
     document.getElementById("objectType").value = state.objectType;
@@ -622,8 +681,11 @@ document.getElementById("artistName").value = localStorage.getItem(ARTIST_KEY) |
 document.getElementById("artistName").addEventListener("change", () => {
   try { localStorage.setItem(ARTIST_KEY, currentArtist()); } catch (_) {}
 });
+try { state.batch = JSON.parse(localStorage.getItem(BATCH_KEY) || "[]") || []; } catch (_) { state.batch = []; }
+if (!Array.isArray(state.batch)) state.batch = [];
 restore();
 refreshChips();
+refreshBatchUI();
 fitCanvas();
 </script>
 </body>
