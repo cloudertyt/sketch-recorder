@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手绘数据集审核 — Dataset Review</title>
+<style>
+  :root{--ink:#1e293b;--accent:#1a2b4a;--bg:#eef2f8;--panel:#fff;--line:#d7dfeb;
+    --muted:#64748b;--active:#2563eb;--danger:#dc2626;--ok:#16a34a;
+    --contour:#1e293b;--construction:#3b82f6;--discard:#f87171}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  #app{max-width:1180px;margin:0 auto;padding:16px 16px 60px}
+  h1{font-size:20px;color:var(--accent);margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:12px;
+    position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(26,43,74,.05)}
+  button{font-size:14px;padding:8px 13px;border-radius:8px;border:1px solid var(--line);
+    background:#fff;color:var(--ink);cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.danger{background:var(--danger);color:#fff;border-color:var(--danger)}
+  .lab{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .spacer{flex:1}
+  .stat{font-size:13px;color:var(--muted)}
+  .stat b{color:var(--accent);font-variant-numeric:tabular-nums}
+  label.tg{font-size:13px;color:var(--muted);display:inline-flex;gap:5px;align-items:center}
+
+  #drop{border:2px dashed var(--line);border-radius:14px;background:var(--panel);
+    padding:36px 20px;text-align:center;color:var(--muted);margin-bottom:14px}
+  #drop.hot{border-color:var(--active);background:#eff6ff;color:var(--accent)}
+  #drop b{color:var(--accent)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;
+    cursor:pointer;position:relative;transition:.12s}
+  .card:hover{border-color:var(--active)}
+  .card.sel{border-color:var(--active);box-shadow:0 0 0 3px rgba(37,99,235,.18)}
+  .card.del{opacity:.35}
+  .card canvas{display:block;width:100%;height:auto;border-radius:8px;background:#fff}
+  .card .meta{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
+  .card .meta b{color:var(--ink)}
+  .card .idx{position:absolute;top:6px;left:8px;font-size:11px;font-weight:700;
+    color:#fff;background:rgba(26,43,74,.72);border-radius:6px;padding:1px 6px}
+  .card .mark{position:absolute;top:6px;right:8px;font-size:12px;font-weight:700;
+    width:20px;height:20px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;background:#e2e8f0;color:#94a3b8}
+  .card.sel .mark{background:var(--active);color:#fff}
+  .badge{display:inline-block;font-size:10px;padding:1px 5px;border-radius:4px;
+    background:#f1f5f9;color:var(--muted);margin-right:3px}
+
+  #detail{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;
+    align-items:center;justify-content:center;z-index:40}
+  #detail.open{display:flex}
+  #detailCard{background:#fff;border-radius:14px;padding:14px;width:min(760px,94vw);
+    max-height:92vh;overflow:auto}
+  #detailCard canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:10px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .legend{font-size:12px;color:var(--muted);line-height:1.8}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;
+    vertical-align:middle}
+  .note{font-size:12px;color:var(--muted);line-height:1.6;margin-top:12px}
+  code{background:#f1f5f9;border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>手绘数据集审核</h1>
+  <div class="sub">拖入录制器导出的 JSON（单张或批量都可以）→ 预览、勾选、删除 → 导出干净的数据集。全部在本地浏览器完成，不上传。</div>
+
+  <div id="drop">
+    把 <b>.json</b> 文件拖到这里，或 <button id="pickBtn" class="primary" style="margin:0 4px">选择文件</button>
+    <input id="fileInput" type="file" accept=".json,application/json" multiple hidden>
+    <div style="font-size:12px;margin-top:8px">支持 <code>handdrawn-stroke-v2</code>（单张）与 <code>handdrawn-batch-v1</code>（批量）</div>
+  </div>
+
+  <div class="bar" id="bar" style="display:none">
+    <span class="stat" id="stats"></span>
+    <span class="spacer"></span>
+    <label class="tg"><input type="checkbox" id="showConstruction" checked> 辅助线</label>
+    <label class="tg"><input type="checkbox" id="showDiscard"> 废弃线</label>
+    <span class="lab">选择</span>
+    <button id="selAll">全选</button>
+    <button id="selNone">取消</button>
+    <button id="selInvert">反选</button>
+    <button id="delBtn" class="danger" disabled>删除所选</button>
+    <button id="exportBtn" class="primary" disabled>导出保留的</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="note" id="hint" style="display:none">
+    点缩略图 = 勾选／取消；点右上角数字放大查看单张（可看笔序回放、各角色笔迹）。删除只在本页面生效，导出的文件才是最终结果。
+  </div>
+</div>
+
+<div id="detail">
+  <div id="detailCard">
+    <strong id="detailTitle" style="color:#1a2b4a"></strong>
+    <div class="row">
+      <label class="tg"><input type="checkbox" id="dContour" checked> <span class="sw" style="background:var(--contour)"></span>定稿线</label>
+      <label class="tg"><input type="checkbox" id="dConstruction" checked> <span class="sw" style="background:var(--construction)"></span>辅助线</label>
+      <label class="tg"><input type="checkbox" id="dDiscard" checked> <span class="sw" style="background:var(--discard)"></span>废弃线</label>
+      <span class="spacer"></span>
+      <button id="replayBtn">▶ 回放笔序</button>
+    </div>
+    <canvas id="detailCv" width="760" height="760"></canvas>
+    <div class="legend" id="detailInfo"></div>
+    <div class="row">
+      <button id="toggleSelBtn" class="primary">勾选／取消这张</button>
+      <button id="prevBtn">← 上一张</button>
+      <button id="nextBtn">下一张 →</button>
+      <button id="closeDetailBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* 数据集审核工具：导入 → 审核 → 删除 → 导出。
+   只读地渲染录制器的数据，不修改笔迹本身；删除=从导出集合里剔除。 */
+
+const ROLE_COLOR = { contour:"#1e293b", construction:"#3b82f6", discard:"#f87171" };
+const state = { items: [], sel: new Set(), detail: -1, replaying: false };
+window.ReviewState = state;
+
+/* ---------- 导入 ---------- */
+function normalizeDrawing(d, srcFile, inheritArtist) {
+  if (!d || typeof d !== "object" || !Array.isArray(d.strokes)) return null;
+  return {
+    object_type: d.object_type || "unknown",
+    pose: d.pose || "(未标)",
+    artist: d.artist || inheritArtist || "(未标)",
+    created: d.created || "",
+    canvas: d.canvas || { w: 1000, h: 1000 },
+    strokes: d.strokes,
+    schema: d.schema || "handdrawn-stroke-v2",
+    src: srcFile,
+  };
+}
+function ingest(json, srcFile) {
+  const added = [];
+  if (json && Array.isArray(json.drawings)) {                 // 批量文件
+    for (const d of json.drawings) {
+      const n = normalizeDrawing(d, srcFile, json.artist);
+      if (n) added.push(n);
+    }
+  } else {                                                     // 单张文件
+    const n = normalizeDrawing(json, srcFile, null);
+    if (n) added.push(n);
+  }
+  return added;
+}
+async function handleFiles(files) {
+  let ok = 0, bad = 0;
+  for (const f of files) {
+    try {
+      const txt = await f.text();
+      const added = ingest(JSON.parse(txt), f.name);
+      if (added.length) { state.items.push(...added); ok += added.length; }
+      else bad++;
+    } catch (_) { bad++; }
+  }
+  if (bad) alert(`有 ${bad} 个文件无法识别（不是录制器导出的 JSON？），已跳过。`);
+  if (ok) { renderGrid(); }
+}
+
+/* ---------- 绘制 ---------- */
+function visibleStrokes(item, roles) {
+  return item.strokes.filter(s => roles.includes(s.role || "contour"));
+}
+function drawInto(cv, item, roles, upto) {
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#fff"; ctx.fillRect(0,0,W,H);
+  const cw = item.canvas.w || 1000, ch = item.canvas.h || 1000;
+  // 自适应：把笔迹包围盒缩放到画布内（留白 8%）
+  const strokes = visibleStrokes(item, roles);
+  const pts = strokes.flatMap(s => s.points || []);
+  if (!pts.length) return;
+  const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const bw = Math.max(1, maxX-minX), bh = Math.max(1, maxY-minY);
+  const pad = 0.08, span = 1 - 2*pad;
+  const k = Math.min(W*span/bw, H*span/bh);
+  const ox = (W - bw*k)/2 - minX*k, oy = (H - bh*k)/2 - minY*k;
+  const T = p => [p[0]*k + ox, p[1]*k + oy];
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  let drawn = 0;
+  for (const s of strokes) {
+    if (upto != null && drawn >= upto) break;
+    const P = (s.points||[]).map(T);
+    if (P.length < 2) { drawn++; continue; }
+    ctx.strokeStyle = ROLE_COLOR[s.role] || ROLE_COLOR.contour;
+    ctx.globalAlpha = s.role === "discard" ? 0.55 : (s.role === "construction" ? 0.8 : 1);
+    ctx.lineWidth = Math.max(1.2, (W/1000) * 3.2);
+    ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]);
+    for (let i=1;i<P.length;i++) ctx.lineTo(P[i][0], P[i][1]);
+    if (s.closed) ctx.closePath();
+    ctx.stroke();
+    drawn++;
+  }
+  ctx.globalAlpha = 1;
+}
+function gridRoles() {
+  const r = ["contour"];
+  if (document.getElementById("showConstruction").checked) r.push("construction");
+  if (document.getElementById("showDiscard").checked) r.push("discard");
+  return r;
+}
+
+/* ---------- 网格 ---------- */
+function roleCounts(item) {
+  const c = { contour:0, construction:0, discard:0 };
+  item.strokes.forEach(s => { const r = s.role||"contour"; c[r] = (c[r]||0)+1; });
+  return c;
+}
+function renderGrid() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  const roles = gridRoles();
+  state.items.forEach((item, i) => {
+    const card = document.createElement("div");
+    card.className = "card" + (state.sel.has(i) ? " sel" : "");
+    const cv = document.createElement("canvas");
+    cv.width = 320; cv.height = 320;
+    card.appendChild(cv);
+    const c = roleCounts(item);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = `<b>${item.object_type}</b> · ${item.pose}<br>` +
+      `<span class="badge">定稿 ${c.contour}</span><span class="badge">辅助 ${c.construction}</span>` +
+      (c.discard ? `<span class="badge">废弃 ${c.discard}</span>` : "");
+    card.appendChild(meta);
+    const idx = document.createElement("div");
+    idx.className = "idx"; idx.textContent = i + 1;
+    idx.onclick = (e) => { e.stopPropagation(); openDetail(i); };
+    card.appendChild(idx);
+    const mark = document.createElement("div");
+    mark.className = "mark"; mark.textContent = state.sel.has(i) ? "✓" : "";
+    card.appendChild(mark);
+    card.onclick = () => { toggleSel(i); };
+    grid.appendChild(card);
+    drawInto(cv, item, roles);
+  });
+  refreshBar();
+}
+function toggleSel(i) {
+  if (state.sel.has(i)) state.sel.delete(i); else state.sel.add(i);
+  renderGrid();
+}
+function refreshBar() {
+  const n = state.items.length, s = state.sel.size;
+  document.getElementById("bar").style.display = n ? "" : "none";
+  document.getElementById("hint").style.display = n ? "" : "none";
+  document.getElementById("drop").style.padding = n ? "14px" : "36px 20px";
+  const types = {};
+  state.items.forEach(it => types[it.object_type] = (types[it.object_type]||0)+1);
+  const typeTxt = Object.entries(types).map(([k,v]) => `${k} ${v}`).join(" · ");
+  document.getElementById("stats").innerHTML =
+    `共 <b>${n}</b> 张（${typeTxt || "—"}）　已选 <b>${s}</b>`;
+  document.getElementById("delBtn").disabled = s === 0;
+  document.getElementById("exportBtn").disabled = n === 0;
+}
+
+/* ---------- 工具栏 ---------- */
+document.getElementById("selAll").onclick = () => {
+  state.items.forEach((_, i) => state.sel.add(i)); renderGrid(); };
+document.getElementById("selNone").onclick = () => { state.sel.clear(); renderGrid(); };
+document.getElementById("selInvert").onclick = () => {
+  const next = new Set();
+  state.items.forEach((_, i) => { if (!state.sel.has(i)) next.add(i); });
+  state.sel = next; renderGrid(); };
+document.getElementById("delBtn").onclick = () => {
+  const s = state.sel.size;
+  if (!s || !confirm(`删除所选 ${s} 张？（只影响本页面与导出结果，源文件不动）`)) return;
+  state.items = state.items.filter((_, i) => !state.sel.has(i));
+  state.sel.clear(); state.detail = -1; renderGrid(); };
+document.getElementById("showConstruction").onchange = renderGrid;
+document.getElementById("showDiscard").onchange = renderGrid;
+
+/* ---------- 导出 ---------- */
+document.getElementById("exportBtn").onclick = () => {
+  if (!state.items.length) return;
+  const artist = state.items[0].artist || "me";
+  const payload = { schema: "handdrawn-batch-v1", artist,
+    created: new Date().toISOString(), count: state.items.length,
+    drawings: state.items.map(it => ({
+      schema: "handdrawn-stroke-v2", object_type: it.object_type, pose: it.pose,
+      artist: it.artist, created: it.created, canvas: it.canvas, strokes: it.strokes })) };
+  const d = new Date(), z = n => String(n).padStart(2,"0");
+  const name = `${String(artist).replace(/[^\w一-鿿-]+/g,"_")}_reviewed_${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}.json`;
+  const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+};
+
+/* ---------- 拖入 / 选择文件 ---------- */
+const drop = document.getElementById("drop");
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add("hot"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove("hot"); }));
+drop.addEventListener("drop", e => {
+  const files = [...(e.dataTransfer?.files || [])].filter(f => /\.json$/i.test(f.name));
+  if (files.length) handleFiles(files);
+});
+// 整页也接受拖入，省得非要瞄准框
+["dragover","drop"].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+document.addEventListener("drop", e => {
+  if (drop.contains(e.target)) return;
+  const files = [...(e.dataTransfer?.files || [])].filter(f => /\.json$/i.test(f.name));
+  if (files.length) handleFiles(files);
+});
+document.getElementById("pickBtn").onclick = () => document.getElementById("fileInput").click();
+document.getElementById("fileInput").onchange = e => {
+  if (e.target.files?.length) handleFiles([...e.target.files]);
+  e.target.value = "";
+};
+
+/* ---------- 放大查看 ---------- */
+function detailRoles() {
+  const r = [];
+  if (document.getElementById("dContour").checked) r.push("contour");
+  if (document.getElementById("dConstruction").checked) r.push("construction");
+  if (document.getElementById("dDiscard").checked) r.push("discard");
+  return r;
+}
+function openDetail(i) {
+  state.detail = i;
+  const item = state.items[i];
+  if (!item) return;
+  document.getElementById("detailTitle").textContent =
+    `第 ${i+1} / ${state.items.length} 张 — ${item.object_type} · ${item.pose} · ${item.artist}`;
+  const c = roleCounts(item);
+  const labels = {};
+  item.strokes.forEach(s => { const k = (s.label||"(无标签)"); labels[k] = (labels[k]||0)+1; });
+  document.getElementById("detailInfo").innerHTML =
+    `笔画 ${item.strokes.length}（定稿 ${c.contour} · 辅助 ${c.construction} · 废弃 ${c.discard}）` +
+    `　来源文件 <code>${item.src||"—"}</code><br>标签：` +
+    Object.entries(labels).sort((a,b)=>b[1]-a[1])
+      .map(([k,v]) => `<span class="badge">${k} ×${v}</span>`).join("");
+  document.getElementById("toggleSelBtn").textContent =
+    state.sel.has(i) ? "取消勾选这张" : "勾选这张";
+  document.getElementById("detail").classList.add("open");
+  drawInto(document.getElementById("detailCv"), item, detailRoles());
+}
+["dContour","dConstruction","dDiscard"].forEach(id =>
+  document.getElementById(id).onchange = () => {
+    if (state.detail >= 0)
+      drawInto(document.getElementById("detailCv"), state.items[state.detail], detailRoles());
+  });
+document.getElementById("closeDetailBtn").onclick = () => {
+  document.getElementById("detail").classList.remove("open"); state.detail = -1; };
+document.getElementById("toggleSelBtn").onclick = () => {
+  if (state.detail < 0) return;
+  toggleSel(state.detail);
+  document.getElementById("toggleSelBtn").textContent =
+    state.sel.has(state.detail) ? "取消勾选这张" : "勾选这张";
+};
+document.getElementById("prevBtn").onclick = () => {
+  if (state.detail > 0) openDetail(state.detail - 1); };
+document.getElementById("nextBtn").onclick = () => {
+  if (state.detail < state.items.length - 1) openDetail(state.detail + 1); };
+document.getElementById("replayBtn").onclick = async () => {
+  if (state.detail < 0 || state.replaying) return;
+  state.replaying = true;
+  const btn = document.getElementById("replayBtn"); btn.disabled = true;
+  const item = state.items[state.detail], roles = detailRoles();
+  const total = visibleStrokes(item, roles).length;
+  for (let n = 1; n <= total; n++) {
+    drawInto(document.getElementById("detailCv"), item, roles, n);
+    await new Promise(r => setTimeout(r, 220));
+  }
+  state.replaying = false; btn.disabled = false;
+};
+document.addEventListener("keydown", e => {
+  if (!document.getElementById("detail").classList.contains("open")) return;
+  if (e.key === "Escape") document.getElementById("closeDetailBtn").click();
+  else if (e.key === "ArrowLeft") document.getElementById("prevBtn").click();
+  else if (e.key === "ArrowRight") document.getElementById("nextBtn").click();
+  else if (e.key === " ") { e.preventDefault(); document.getElementById("toggleSelBtn").click(); }
+});
+
+refreshBar();
+</script>
+</body>
+</html>

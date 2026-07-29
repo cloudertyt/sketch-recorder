@@ -162,6 +162,20 @@ const PRETAGS = {                        // chip shortcuts; the text box stays f
   pear: ["body", "stem", "outline", "detail"],
   ceramic_jar: ["mouth", "neck", "body", "base", "outline", "detail"],
 };
+/* Guide-type chips for construction strokes: naming them by WHAT GUIDE they are
+   (not "outline") makes the scaffolding data trainable later. Same vocabulary the
+   generator uses, so human and machine construction stay comparable. */
+const GUIDE_PRETAGS = {
+  apple: ["axis", "mass", "well", "stem", "base"],
+  pear: ["axis", "mass", "shoulder", "stem", "base"],
+  ceramic_jar: ["axis", "mass", "mouth", "neck", "shoulder", "base"],
+};
+function chipsForCurrentTag() {
+  const t = state.objectType;
+  return state.tagRole === "construction"
+    ? (GUIDE_PRETAGS[t] || GUIDE_PRETAGS.apple)
+    : (PRETAGS[t] || PRETAGS.apple);
+}
 const ROLE_COLOR = { contour: "#1e293b", construction: "#3b82f6", discard: "#ef4444" };
 const ROLE_ALPHA = { contour: 1.0, construction: 0.75, discard: 0.4 };
 const TAGGED_DIM = 0.45;   // tagged strokes fade so fresh untagged ones stand out — DISPLAY ONLY, never exported
@@ -266,6 +280,14 @@ function inputAllowed(e) {
   return e.pointerType === "pen" || document.getElementById("testInput").checked;
 }
 
+/* True stylus pressure, 0 included. `pressure || 0.5` used to turn a genuine
+   zero-pressure sample into 0.5, corrupting the line-weight channel; only
+   non-pen input (mouse/touch, no real pressure) gets the 0.5 placeholder. */
+function penPressure(e) {
+  if (e.pointerType === "pen" && typeof e.pressure === "number") return e.pressure;
+  return 0.5;
+}
+
 cv.addEventListener("pointerdown", (e) => {
   if (state.replaying) return;
   if (!inputAllowed(e)) {          // e.g. a tablet that reports as mouse, with the toggle off
@@ -280,7 +302,7 @@ cv.addEventListener("pointerdown", (e) => {
   const [x, y] = toLogical(e);
   state.live = { order: state.strokes.length, label: null, role: state.role,
                  closed: false, points: [[x, y]],
-                 width: [e.pressure || 0.5], t: [Math.round(e.timeStamp - state.t0)] };
+                 width: [penPressure(e)], t: [Math.round(e.timeStamp - state.t0)] };
   redraw();
 });
 
@@ -293,7 +315,7 @@ cv.addEventListener("pointermove", (e) => {
     const last = state.live.points[state.live.points.length - 1];
     if (Math.hypot(x - last[0], y - last[1]) < 1.2) continue;   // drop micro-jitter
     state.live.points.push([x, y]);
-    state.live.width.push(ev.pressure || 0.5);
+    state.live.width.push(penPressure(ev));
     state.live.t.push(Math.round(ev.timeStamp - state.t0));
   }
   redraw();
@@ -325,18 +347,7 @@ function openTagSheet() {
     ? [state.selected] : untaggedIndices();
   if (!targets.length) return;
   state.tagTargets = targets;
-  const chips = document.getElementById("tagChips");
-  chips.innerHTML = "";
-  for (const p of PRETAGS[state.objectType]) {
-    const b = document.createElement("button");
-    b.className = "chip";
-    b.textContent = p;
-    b.onclick = () => {          // chip = shortcut that fills the box; box stays editable
-      document.getElementById("tagInput").value = p;
-      document.getElementById("tagInput").focus();
-    };
-    chips.appendChild(b);
-  }
+  renderTagChips();
   document.getElementById("tagTitle").textContent =
     targets.length === 1 && state.strokes[targets[0]].label != null
       ? `Retag stroke #${targets[0]} (now: "${state.strokes[targets[0]].label}")`
@@ -349,6 +360,20 @@ function openTagSheet() {
   redraw();                      // highlights the target strokes above the sheet
 }
 
+function renderTagChips() {
+  const chips = document.getElementById("tagChips");
+  chips.innerHTML = "";
+  for (const p of chipsForCurrentTag()) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = p;
+    b.onclick = () => {          // chip = shortcut that fills the box; box stays editable
+      document.getElementById("tagInput").value = p;
+      document.getElementById("tagInput").focus();
+    };
+    chips.appendChild(b);
+  }
+}
 function refreshTagRoleChips() {
   document.querySelectorAll("[data-tagrole]").forEach(b =>
     b.classList.toggle("active", b.dataset.tagrole === state.tagRole));
@@ -357,6 +382,7 @@ document.querySelectorAll("[data-tagrole]").forEach(b => b.onclick = () => {
   // toggle: tapping the active role clears it back to "keep as drawn" ("")
   state.tagRole = (state.tagRole === b.dataset.tagrole) ? "" : b.dataset.tagrole;
   refreshTagRoleChips();
+  renderTagChips();              // construction <-> contour swaps the chip vocabulary
 });
 
 function applyTag() {
