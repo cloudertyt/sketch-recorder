@@ -128,7 +128,7 @@
 
   <div id="stage"><div id="canvasWrap"><canvas id="cv"></canvas></div></div>
 
-  <footer><span id="status">ready</span><span id="hint">pick a layer, then draw · Tag names the strokes · 👁 hides a layer · Select + a layer chip moves a stroke · Ctrl+Z discards / Ctrl+Y restores</span></footer>
+  <footer><span id="status">ready</span><span id="hint">pick a layer, then draw · Tag names the strokes · 👁 hides a layer · Select + a layer chip moves a stroke · Ctrl+Z discards / Ctrl+Y restores · <b>Alt+T</b> tag · <b>Enter</b> apply</span></footer>
 </div>
 
 <!-- bottom-sheet tagging: pre-tag chips fill the box; the box stays free natural language -->
@@ -425,8 +425,17 @@ function closeTagSheet() {
 document.getElementById("tagBtn").onclick = openTagSheet;
 document.getElementById("tagApplyBtn").onclick = applyTag;
 document.getElementById("tagCancelBtn").onclick = closeTagSheet;
-document.getElementById("tagInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") applyTag();
+/* Shortcuts: Alt+T opens the tag sheet, Enter applies it. Enter is handled
+   globally (not just in the text box) so it also works right after tapping a
+   chip or a layer button — one keystroke, wherever the focus happens to be. */
+document.addEventListener("keydown", (e) => {
+  const sheetOpen = document.getElementById("tagPanel").classList.contains("open");
+  const exportOpen = document.getElementById("exportPanel").classList.contains("open");
+  if (e.altKey && (e.key === "t" || e.key === "T" || e.code === "KeyT")) {
+    if (!sheetOpen && !exportOpen) { e.preventDefault(); openTagSheet(); }
+    return;
+  }
+  if (e.key === "Enter" && sheetOpen && !exportOpen) { e.preventDefault(); applyTag(); }
 });
 
 // Global undo/redo shortcuts (Ctrl/Cmd+Z, Ctrl+Y or Ctrl/Cmd+Shift+Z).

@@ -128,7 +128,7 @@
 
   <div id="stage"><div id="canvasWrap"><canvas id="cv"></canvas></div></div>
 
-  <footer><span id="status">就绪</span><span id="hint">先选图层再画 ·「标注」给笔画命名 · 👁 可隐藏图层 ·「选择」模式点笔画再点图层可移动它 · Ctrl+Z 废弃 / Ctrl+Y 恢复</span></footer>
+  <footer><span id="status">就绪</span><span id="hint">先选图层再画 ·「标注」给笔画命名 · 👁 可隐藏图层 ·「选择」模式点笔画再点图层可移动它 · Ctrl+Z 废弃 / Ctrl+Y 恢复 · <b>Alt+T</b> 标注 · <b>Enter</b> 应用</span></footer>
 </div>
 
 <!-- bottom-sheet tagging: pre-tag chips fill the box; the box stays free natural language -->
@@ -428,8 +428,17 @@ function closeTagSheet() {
 document.getElementById("tagBtn").onclick = openTagSheet;
 document.getElementById("tagApplyBtn").onclick = applyTag;
 document.getElementById("tagCancelBtn").onclick = closeTagSheet;
-document.getElementById("tagInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") applyTag();
+/* Shortcuts: Alt+T opens the tag sheet, Enter applies it. Enter is handled
+   globally (not just in the text box) so it also works right after tapping a
+   chip or a layer button — one keystroke, wherever the focus happens to be. */
+document.addEventListener("keydown", (e) => {
+  const sheetOpen = document.getElementById("tagPanel").classList.contains("open");
+  const exportOpen = document.getElementById("exportPanel").classList.contains("open");
+  if (e.altKey && (e.key === "t" || e.key === "T" || e.code === "KeyT")) {
+    if (!sheetOpen && !exportOpen) { e.preventDefault(); openTagSheet(); }
+    return;
+  }
+  if (e.key === "Enter" && sheetOpen && !exportOpen) { e.preventDefault(); applyTag(); }
 });
 
 // Global undo/redo shortcuts (Ctrl/Cmd+Z, Ctrl+Y or Ctrl/Cmd+Shift+Z).
