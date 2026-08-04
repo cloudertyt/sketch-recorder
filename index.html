@@ -99,6 +99,7 @@
     <button id="addBatchBtn" class="primary" title="save this drawing and start the next">＋ Add to batch</button>
     <button id="exportBatchBtn" disabled title="download all batched drawings as one file">Batch (0)</button>
     <button id="exportBtn">Export one</button>
+    <a href="zh.html" style="font-size:12px;color:#64748b;text-decoration:none;padding:8px 6px">中文</a>
   </header>
 
   <div id="toolbar">
@@ -347,7 +348,6 @@ function openTagSheet() {
     ? [state.selected] : untaggedIndices();
   if (!targets.length) return;
   state.tagTargets = targets;
-  renderTagChips();
   document.getElementById("tagTitle").textContent =
     targets.length === 1 && state.strokes[targets[0]].label != null
       ? `Retag stroke #${targets[0]} (now: "${state.strokes[targets[0]].label}")`
@@ -356,6 +356,8 @@ function openTagSheet() {
     targets.length === 1 ? (state.strokes[targets[0]].label || "") : "";
   state.tagRole = "";            // default: keep each stroke's role as drawn
   refreshTagRoleChips();
+  renderTagChips();              // AFTER the reset: chips must match the role now shown,
+                                 // not the role used the previous time the sheet was open
   document.getElementById("tagPanel").classList.add("open");
   redraw();                      // highlights the target strokes above the sheet
 }
