@@ -73,6 +73,10 @@
     border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   label.toggle { font-size: 13px; color: #64748b; display: inline-flex; gap: 4px; align-items: center; }
+  /* layer strip: a chip selects the layer you draw INTO, the eye shows/hides it */
+  .eyebtn { font-size: 13px; padding: 6px 7px; border-radius: 8px; border: 1px solid var(--line);
+    background: #fff; cursor: pointer; line-height: 1; }
+  .eyebtn.off { opacity: .3; }
 </style>
 </head>
 <body>
@@ -103,6 +107,13 @@
   </header>
 
   <div id="toolbar">
+    <div class="group"><span class="lab">layer</span>
+      <button class="chip lyr role-contour active" data-lyr="contour">contour</button>
+      <button class="eyebtn" data-eye="contour" title="show / hide">👁</button>
+      <button class="chip lyr role-construction" data-lyr="construction">construction</button>
+      <button class="eyebtn" data-eye="construction" title="show / hide">👁</button>
+      <button class="eyebtn off" data-eye="discard" title="show / hide discarded">👁 discard</button>
+    </div>
     <div class="group"><span class="lab">mode</span>
       <button class="chip" id="modeDraw">Draw</button>
       <button class="chip" id="modeSelect">Select</button>
@@ -117,7 +128,7 @@
 
   <div id="stage"><div id="canvasWrap"><canvas id="cv"></canvas></div></div>
 
-  <footer><span id="status">ready</span><span id="hint">pen draws · draw then Tag · Select taps a stroke to retag · Ctrl+Z discards last stroke (kept as data) / Ctrl+Y restores</span></footer>
+  <footer><span id="status">ready</span><span id="hint">pick a layer, then draw · Tag names the strokes · 👁 hides a layer · Select + a layer chip moves a stroke · Ctrl+Z discards / Ctrl+Y restores</span></footer>
 </div>
 
 <!-- bottom-sheet tagging: pre-tag chips fill the box; the box stays free natural language -->
@@ -173,7 +184,8 @@ const GUIDE_PRETAGS = {
 };
 function chipsForCurrentTag() {
   const t = state.objectType;
-  return state.tagRole === "construction"
+  const role = state.tagRole || state.activeLayer;
+  return role === "construction"
     ? (GUIDE_PRETAGS[t] || GUIDE_PRETAGS.apple)
     : (PRETAGS[t] || PRETAGS.apple);
 }
@@ -187,7 +199,8 @@ const state = {
   pose: "upright",          // upright | lean_left | lean_right — recorded per drawing
   batch: [],                // completed drawings awaiting a single bundled export
   exportFilename: null,     // filename the export panel's Download button should use
-  role: "contour",
+  activeLayer: "contour",   // the layer new strokes go into (= their role)
+  hidden: { discard: true },// display-only; hidden strokes are still exported
   mode: "draw",             // draw | select
   strokes: [],              // {order, label|null, role, closed, points[[x,y]], width[], t[]}
   discardStack: [],         // [{index, priorRole}] — undo discards a stroke, redo restores it
@@ -270,8 +283,10 @@ function redraw() {
     ctx.restore();
   }
   const sheetOpen = document.getElementById("tagPanel").classList.contains("open");
-  state.strokes.forEach((s, i) => drawStroke(s,
-    i === state.selected || (sheetOpen && state.tagTargets.includes(i))));
+  state.strokes.forEach((s, i) => {
+    if (state.hidden[s.role]) return;          // hidden layer: not drawn, still kept
+    drawStroke(s, i === state.selected || (sheetOpen && state.tagTargets.includes(i)));
+  });
   if (state.live) drawStroke(state.live, false);
   updateStatus();
 }
@@ -301,7 +316,7 @@ cv.addEventListener("pointerdown", (e) => {
   cv.setPointerCapture(e.pointerId);
   if (state.t0 === null) state.t0 = e.timeStamp;
   const [x, y] = toLogical(e);
-  state.live = { order: state.strokes.length, label: null, role: state.role,
+  state.live = { order: state.strokes.length, label: null, role: state.activeLayer,
                  closed: false, points: [[x, y]],
                  width: [penPressure(e)], t: [Math.round(e.timeStamp - state.t0)] };
   redraw();
@@ -338,7 +353,8 @@ cv.addEventListener("contextmenu", (e) => e.preventDefault());
 /* ---------- tagging: batch natural-language labels ---------- */
 function untaggedIndices() {
   // discarded strokes don't need a label — exclude them from the "untagged" batch
-  return state.strokes.map((s, i) => (s.label == null && s.role !== "discard") ? i : -1)
+  return state.strokes.map((s, i) =>
+      (s.label == null && s.role !== "discard" && !state.hidden[s.role]) ? i : -1)
                       .filter(i => i >= 0);
 }
 
@@ -428,6 +444,7 @@ document.addEventListener("keydown", (e) => {
 function selectAt([x, y]) {
   let best = -1, bestD = 30;                       // logical-px hit threshold
   state.strokes.forEach((s, i) => {
+    if (state.hidden[s.role]) return;              // can't pick what you can't see
     for (const p of s.points) {                    // every point: sparse strokes must stay hittable
       const d = Math.hypot(p[0] - x, p[1] - y);
       if (d < bestD) { bestD = d; best = i; }
@@ -465,7 +482,27 @@ function redo() {
 }
 
 /* ---------- UI wiring ---------- */
+document.querySelectorAll("[data-lyr]").forEach(b => b.onclick = () => {
+  if (state.mode === "select" && state.selected >= 0) setSelected("role", b.dataset.lyr);  // move stroke
+  else state.activeLayer = b.dataset.lyr;                                                  // draw here next
+  state.hidden[b.dataset.lyr] = false;      // selecting a layer reveals it
+  refreshChips(); redraw();
+});
+document.querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
+  const r = b.dataset.eye;
+  state.hidden[r] = !state.hidden[r];
+  if (state.hidden[r] && state.activeLayer === r) state.activeLayer = r === "contour" ? "construction" : "contour";
+  state.selected = -1;
+  refreshChips(); redraw();
+});
+function refreshLayerUI() {
+  document.querySelectorAll("[data-lyr]").forEach(b =>
+    b.classList.toggle("active", b.dataset.lyr === state.activeLayer));
+  document.querySelectorAll("[data-eye]").forEach(b =>
+    b.classList.toggle("off", !!state.hidden[b.dataset.eye]));
+}
 function refreshChips() {
+  refreshLayerUI();
   document.getElementById("modeDraw").classList.toggle("active", state.mode === "draw");
   document.getElementById("modeSelect").classList.toggle("active", state.mode === "select");
   const sel = state.selected >= 0 && state.mode === "select";
@@ -492,8 +529,9 @@ function updateStatus() {
   const by = { contour: 0, construction: 0, discard: 0 };
   state.strokes.forEach(s => by[s.role] = (by[s.role] || 0) + 1);
   const n = untaggedIndices().length;
+  const LYR = { contour: "contour", construction: "construction" };
   document.getElementById("status").textContent =
-    `${state.objectType} · ${state.strokes.length} strokes ` +
+    `✏ ${LYR[state.activeLayer] || state.activeLayer} · ${state.objectType} · ${state.strokes.length} strokes ` +
     `(contour ${by.contour} · construction ${by.construction} · discard ${by.discard})` +
     (n ? ` · untagged ${n}` : "");
 }
@@ -556,6 +594,7 @@ document.getElementById("replayBtn").onclick = async () => {
   ctx.clearRect(0, 0, LOGICAL, LOGICAL);
   let prevEnd = null;
   for (const s of state.strokes) {
+    if (state.hidden[s.role]) continue;
     if (prevEnd != null)                  // pause between strokes, capped
       await wait(Math.min((s.t[0] - prevEnd) / REPLAY_SPEED, STROKE_GAP_CAP));
     for (let i = 1; i < s.points.length; i++) {
