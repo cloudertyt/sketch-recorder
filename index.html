@@ -90,11 +90,6 @@
       <option value="pear">pear</option>
       <option value="ceramic_jar">ceramic_jar</option>
     </select>
-    <select id="poseSel" title="pose (recorded with the drawing)">
-      <option value="upright">upright</option>
-      <option value="lean_left">lean ◀</option>
-      <option value="lean_right">lean ▶</option>
-    </select>
     <button id="tagBtn">Tag</button>
     <button id="newBtn">New</button>
     <button id="undoBtn">Undo</button>
@@ -687,7 +682,9 @@ document.getElementById("closeExportBtn").onclick = () =>
   document.getElementById("exportPanel").classList.remove("open");
 
 /* ---------- pose ---------- */
-document.getElementById("poseSel").onchange = (e) => { state.pose = e.target.value; autosave(); };
+/* Tilted poses are switched off for now (all drawings are upright). `pose` stays
+   in the schema so existing files keep working; to bring tilt back, restore the
+   <select id="poseSel"> in the toolbar and this one-line handler. */
 
 /* ---------- batch: collect many drawings, export as one file ---------- */
 const BATCH_KEY = "sketch_recorder_batch_v1";
@@ -743,7 +740,7 @@ function restore() {
     const raw = localStorage.getItem(AUTOSAVE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (data.pose) { state.pose = data.pose; document.getElementById("poseSel").value = state.pose; }
+    if (data.pose) state.pose = data.pose;
     if (!data.strokes || !data.strokes.length) return;
     state.objectType = data.objectType || "apple";
     document.getElementById("objectType").value = state.objectType;

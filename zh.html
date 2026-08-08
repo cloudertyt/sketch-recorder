@@ -90,11 +90,6 @@
       <option value="pear">pear</option>
       <option value="ceramic_jar">ceramic_jar</option>
     </select>
-    <select id="poseSel" title="姿态（会随图一起记录）">
-      <option value="upright">直立</option>
-      <option value="lean_left">左倾 ◀</option>
-      <option value="lean_right">右倾 ▶</option>
-    </select>
     <button id="tagBtn">标注</button>
     <button id="newBtn">新建</button>
     <button id="undoBtn">撤销</button>
@@ -690,7 +685,9 @@ document.getElementById("closeExportBtn").onclick = () =>
   document.getElementById("exportPanel").classList.remove("open");
 
 /* ---------- pose ---------- */
-document.getElementById("poseSel").onchange = (e) => { state.pose = e.target.value; autosave(); };
+/* Tilted poses are switched off for now (all drawings are upright). `pose` stays
+   in the schema so existing files keep working; to bring tilt back, restore the
+   <select id="poseSel"> in the toolbar and this one-line handler. */
 
 /* ---------- batch: collect many drawings, export as one file ---------- */
 const BATCH_KEY = "sketch_recorder_batch_v1";
@@ -746,7 +743,7 @@ function restore() {
     const raw = localStorage.getItem(AUTOSAVE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (data.pose) { state.pose = data.pose; document.getElementById("poseSel").value = state.pose; }
+    if (data.pose) state.pose = data.pose;
     if (!data.strokes || !data.strokes.length) return;
     state.objectType = data.objectType || "apple";
     document.getElementById("objectType").value = state.objectType;
